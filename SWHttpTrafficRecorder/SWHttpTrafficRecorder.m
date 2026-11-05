@@ -490,9 +490,9 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
 #pragma mark - Recording Progress 
 
 + (void)updateRecorderProgressDelegate:(SWHTTPTrafficRecordingProgressKind)progress userInfo:(NSDictionary *)info{
-    SWHttpTrafficRecorder *recorder = [SWHttpTrafficRecorder sharedRecorder];
-    if(recorder.progressDelegate && [recorder.progressDelegate respondsToSelector:@selector(updateRecordingProgress:userInfo:)]){
-        [recorder.progressDelegate updateRecordingProgress:progress userInfo:info];
+    id<SWHttpTrafficRecordingProgressDelegate> delegate = [SWHttpTrafficRecorder sharedRecorder].progressDelegate;
+    if(delegate && [delegate respondsToSelector:@selector(updateRecordingProgress:userInfo:)]){
+        [delegate updateRecordingProgress:progress userInfo:info];
     }
 }
 
