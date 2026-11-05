@@ -67,6 +67,8 @@ You may need the latest developer tools in order to build the demo project and r
 
 ### Security Consideration
 
+The recorder keeps at most `SWHttpTrafficRecorderMaximumRecordedBodyLength` (64KiB) of each response body. A larger response is still delivered to the app unchanged, but it is not recorded: its buffered body is discarded and the progress delegate receives `SWHTTPTrafficRecordingProgressFailedToRecord` with a `SWHttpTrafficRecorderErrorResponseBodyTooLarge` error.
+
 While creating files for HTTP(s) requests, the recorder uses `NSFileProtectionComplete` for `NSFileProtectionKey` attribute to improve the file security. It is a generic library that is designed to record and monitor traffic activity, however, each app may apply its own discretion over what to record and monitor based on its own policy and regulation.
 
 

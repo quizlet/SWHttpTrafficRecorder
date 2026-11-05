@@ -52,8 +52,13 @@ typedef NS_ENUM(NSInteger, SWHttpTrafficRecorderError) {
     /** The specified path does not exist and cannot be created */
     SWHttpTrafficRecorderErrorPathFailedToCreate = 1,
     /** The specified path was not writable */
-    SWHttpTrafficRecorderErrorPathNotWritable
+    SWHttpTrafficRecorderErrorPathNotWritable,
+    /** The response body was larger than SWHttpTrafficRecorderMaximumRecordedBodyLength, so it was not recorded */
+    SWHttpTrafficRecorderErrorResponseBodyTooLarge
 };
+
+/* The largest response body, in bytes, that the recorder keeps and records. A larger response is still delivered to the application, but its recording fails with SWHttpTrafficRecorderErrorResponseBodyTooLarge and the buffered body is discarded. */
+FOUNDATION_EXPORT const NSUInteger SWHttpTrafficRecorderMaximumRecordedBodyLength;
 
 /**
  * Recording progress that is reported by SWHttpTrafficRecorder at each phase of recording a request and its response.

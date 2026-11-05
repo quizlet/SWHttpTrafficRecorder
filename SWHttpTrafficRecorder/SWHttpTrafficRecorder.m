@@ -31,6 +31,14 @@ NSString * const SWHTTPTrafficRecordingProgressErrorKey     = @"ERROR_KEY";
 
 NSString * const SWHttpTrafficRecorderErrorDomain           = @"RECORDER_ERROR_DOMAIN";
 
+const NSUInteger SWHttpTrafficRecorderMaximumRecordedBodyLength = 64 * 1024;
+
+/* Upper bound on the bytes handed to the file creation queue for one recording, after base64 encoding, JSON pretty printing, token replacement and headers are applied to a body of at most SWHttpTrafficRecorderMaximumRecordedBodyLength. */
+static const NSUInteger SWMaximumRecordedFileLength = 4 * SWHttpTrafficRecorderMaximumRecordedBodyLength;
+
+/* Assumed upper bound on the bytes NSJSONSerialization emits per indentation level when pretty printing. */
+static const NSUInteger SWJSONPrettyPrintIndentBound = 4;
+
 @interface SWHttpTrafficRecorder()
 @property(nonatomic, assign, readwrite) BOOL isRecording;
 @property(nonatomic, strong) NSString *recordingPath;
@@ -209,13 +217,27 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
     [self.client URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
     
     self.response = response;
-    self.mutableData = [[NSMutableData alloc] init];
+    long long expectedLength = response.expectedContentLength;
+    if(expectedLength != NSURLResponseUnknownLength && expectedLength > (long long)SWHttpTrafficRecorderMaximumRecordedBodyLength){
+        self.mutableData = nil;
+    } else {
+        self.mutableData = [[NSMutableData alloc] init];
+    }
 }
 
 - (void) connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
     [self.client URLProtocol:self didLoadData:data];
     
-    [self.mutableData appendData:data];
+    // A nil buffer means this response is not being recorded because it exceeded the size limit.
+    NSMutableData *buffer = self.mutableData;
+    if(!buffer){
+        return;
+    }
+    if(data.length > SWHttpTrafficRecorderMaximumRecordedBodyLength - buffer.length){
+        self.mutableData = nil;
+        return;
+    }
+    [buffer appendData:data];
 }
 
 - (void) connectionDidFinishLoading:(NSURLConnection *)connection {
@@ -223,6 +245,17 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
     
     NSHTTPURLResponse *response = (NSHTTPURLResponse *)self.response;
     NSURLRequest *request = (NSURLRequest*)connection.currentRequest;
+    
+    if(!self.mutableData){
+        NSError *error = [NSError errorWithDomain:SWHttpTrafficRecorderErrorDomain code:SWHttpTrafficRecorderErrorResponseBodyTooLarge userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Response body exceeded the maximum recorded size of %lu bytes and was not recorded.", (unsigned long)SWHttpTrafficRecorderMaximumRecordedBodyLength]}];
+        NSMutableDictionary *userInfo = [NSMutableDictionary dictionaryWithObject:self.request forKey:SWHTTPTrafficRecordingProgressRequestKey];
+        [userInfo setObject:error forKey:SWHTTPTrafficRecordingProgressErrorKey];
+        if(self.response){
+            [userInfo setObject:self.response forKey:SWHTTPTrafficRecordingProgressResponseKey];
+        }
+        [self.class updateRecorderProgressDelegate:SWHTTPTrafficRecordingProgressFailedToRecord userInfo:userInfo];
+        return;
+    }
     
     [self.class updateRecorderProgressDelegate:SWHTTPTrafficRecordingProgressLoaded
                                       userInfo:@{SWHTTPTrafficRecordingProgressRequestKey: self.request,
@@ -338,7 +371,10 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
     {
         NSError *error;
         id json = [NSJSONSerialization JSONObjectWithData:bodyData options:0 error:&error];
-        if(json && !error){
+        NSUInteger budget = SWMaximumRecordedFileLength - MIN(SWMaximumRecordedFileLength, 2 * bodyData.length);
+        if(json && !error && [self prettyPrintOverheadOfJSONObject:json exceeds:budget]){
+            NSLog(@"Skipped pretty printing the JSON response body because its indentation would exceed %lu bytes.", (unsigned long)budget);
+        } else if(json && !error){
             bodyData = [NSJSONSerialization dataWithJSONObject:json options:NSJSONWritingPrettyPrinted error:&error];
             if(error){
                 NSLog(@"Somehow the content is not a json though the mime type is json: %@", error);
@@ -350,7 +386,46 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
     return bodyData;
 }
 
+// Pretty printing puts every array element and dictionary entry on its own indented line, so deeply nested JSON grows quadratically. Walks the parsed object and stops once the added bytes could exceed the budget.
+-(BOOL)prettyPrintOverheadOfJSONObject:(id)json exceeds:(NSUInteger)budget{
+    NSMutableArray *nodes = [NSMutableArray arrayWithObject:json];
+    NSMutableArray *depths = [NSMutableArray arrayWithObject:[NSNumber numberWithUnsignedInteger:0]];
+    NSUInteger overhead = 0;
+    while(nodes.count > 0){
+        id node = [nodes lastObject];
+        NSUInteger depth = [[depths lastObject] unsignedIntegerValue];
+        [nodes removeLastObject];
+        [depths removeLastObject];
+        
+        NSArray *children = nil;
+        if([node isKindOfClass:[NSDictionary class]]){
+            children = [(NSDictionary *)node allValues];
+        } else if([node isKindOfClass:[NSArray class]]){
+            children = node;
+        }
+        if(children.count == 0){
+            continue;
+        }
+        NSUInteger lineCost = 2 + SWJSONPrettyPrintIndentBound * (depth + 1);
+        if(children.count + 1 > (budget - overhead) / lineCost){
+            return YES;
+        }
+        overhead += (children.count + 1) * lineCost;
+        NSNumber *childDepth = [NSNumber numberWithUnsignedInteger:depth + 1];
+        for(id child in children){
+            [nodes addObject:child];
+            [depths addObject:childDepth];
+        }
+    }
+    return NO;
+}
+
 -(void)createFileAt:(NSString *)filePath usingData:(NSData *)data completionHandler:(void(^)(BOOL created))completionHandler{
+    if(data.length > SWMaximumRecordedFileLength){
+        NSLog(@"Recording for '%@' was not written because it exceeded %lu bytes.", filePath, (unsigned long)SWMaximumRecordedFileLength);
+        completionHandler(NO);
+        return;
+    }
     __block BOOL created = NO;
     NSBlockOperation* creationOp = [NSBlockOperation blockOperationWithBlock: ^{
         created = [NSFileManager.defaultManager createFileAtPath:filePath contents:data attributes:[NSDictionary dictionaryWithObject:NSFileProtectionComplete forKey:NSFileProtectionKey]];
