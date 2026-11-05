@@ -409,15 +409,16 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
 }
 
 -(NSData *)replaceRegexWithTokensInData: (NSData *) data {
-    SWHttpTrafficRecorder *recorder = [SWHttpTrafficRecorder sharedRecorder];
-    if(![recorder replacementDict]) {
+    NSDictionary *replacementDict = [SWHttpTrafficRecorder sharedRecorder].replacementDict;
+    if(!replacementDict) {
         return data;
     }
     else {
         NSString *dataString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        for(NSString *key in [recorder replacementDict]) {
-            if([[[recorder replacementDict] objectForKey: key] isKindOfClass:[NSRegularExpression class]]) {
-                dataString = [[[recorder replacementDict] objectForKey:key] stringByReplacingMatchesInString:dataString options:0 range:NSMakeRange(0, [dataString length]) withTemplate:key];
+        for(NSString *key in replacementDict) {
+            id regex = [replacementDict objectForKey:key];
+            if([regex isKindOfClass:[NSRegularExpression class]]) {
+                dataString = [regex stringByReplacingMatchesInString:dataString options:0 range:NSMakeRange(0, [dataString length]) withTemplate:key];
             }
         }
         data = [dataString dataUsingEncoding:NSUTF8StringEncoding];
@@ -489,9 +490,9 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
 #pragma mark - Recording Progress 
 
 + (void)updateRecorderProgressDelegate:(SWHTTPTrafficRecordingProgressKind)progress userInfo:(NSDictionary *)info{
-    SWHttpTrafficRecorder *recorder = [SWHttpTrafficRecorder sharedRecorder];
-    if(recorder.progressDelegate && [recorder.progressDelegate respondsToSelector:@selector(updateRecordingProgress:userInfo:)]){
-        [recorder.progressDelegate updateRecordingProgress:progress userInfo:info];
+    id<SWHttpTrafficRecordingProgressDelegate> delegate = [SWHttpTrafficRecorder sharedRecorder].progressDelegate;
+    if(delegate && [delegate respondsToSelector:@selector(updateRecordingProgress:userInfo:)]){
+        [delegate updateRecordingProgress:progress userInfo:info];
     }
 }
 
