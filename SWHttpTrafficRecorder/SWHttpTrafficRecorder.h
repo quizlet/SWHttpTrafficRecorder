@@ -163,7 +163,7 @@ FOUNDATION_EXPORT NSString * const SWHttpTrafficRecorderErrorDomain;
 /**
  *  A Dictionary containing Regex/Token pairs for replacement in response data
  */
-@property(nonatomic, assign) NSMutableDictionary *replacementDict;
+@property(atomic, strong) NSMutableDictionary *replacementDict;
 
 /**
  *  The delegate where the recording progress are reported. 

@@ -409,15 +409,16 @@ static NSString * const SWRecordingLProtocolHandledKey = @"SWRecordingLProtocolH
 }
 
 -(NSData *)replaceRegexWithTokensInData: (NSData *) data {
-    SWHttpTrafficRecorder *recorder = [SWHttpTrafficRecorder sharedRecorder];
-    if(![recorder replacementDict]) {
+    NSDictionary *replacementDict = [SWHttpTrafficRecorder sharedRecorder].replacementDict;
+    if(!replacementDict) {
         return data;
     }
     else {
         NSString *dataString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-        for(NSString *key in [recorder replacementDict]) {
-            if([[[recorder replacementDict] objectForKey: key] isKindOfClass:[NSRegularExpression class]]) {
-                dataString = [[[recorder replacementDict] objectForKey:key] stringByReplacingMatchesInString:dataString options:0 range:NSMakeRange(0, [dataString length]) withTemplate:key];
+        for(NSString *key in replacementDict) {
+            id regex = [replacementDict objectForKey:key];
+            if([regex isKindOfClass:[NSRegularExpression class]]) {
+                dataString = [regex stringByReplacingMatchesInString:dataString options:0 range:NSMakeRange(0, [dataString length]) withTemplate:key];
             }
         }
         data = [dataString dataUsingEncoding:NSUTF8StringEncoding];
